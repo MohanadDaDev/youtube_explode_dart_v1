@@ -158,13 +158,25 @@ class StreamClient {
   Stream<List<int>> get(StreamInfo streamInfo) =>
       _httpClient.getStream(streamInfo, streamClient: this);
 
-  Stream<StreamInfo> _getStreams(VideoId videoId,
-      {required YoutubeApiClient ytClient,
-      required bool requireWatchPage}) async* {
-    // Use await for instead of yield* to catch exceptions
-    await for (final stream
-        in _getStream(videoId, ytClient, requireWatchPage)) {
-      yield stream;
+   Stream<StreamInfo> _getStreams(VideoId videoId, { bool requireWatchPage = true, required YoutubeApiClient ytClient,}) async* {
+    try {
+      if (requireWatchPage) {
+        await for (final stream
+            in _getStream(videoId, ytClient,requireWatchPage)) {
+          yield stream;
+        }
+      } else {
+        // Use await for instead of yield* to catch exceptions
+        await for (final stream
+            in _getStream(videoId, ytClient,requireWatchPage)) {
+          yield stream;
+        }
+      }
+    } on VideoUnplayableException catch (e) {
+      if (e is VideoRequiresPurchaseException) {
+        rethrow;
+      }
+      // yield* _getCipherStream(videoId);
     }
   }
 

@@ -1,3 +1,5 @@
+import 'package:isolate_manager/isolate_manager.dart';
+
 import '../common/common.dart';
 import '../extensions/helpers_extension.dart';
 import '../playlists/playlists.dart';
@@ -13,16 +15,20 @@ import 'channels.dart';
 /// Queries related to YouTube channels.
 class ChannelClient {
   final YoutubeHttpClient _httpClient;
+  final IsolateManager<ChannelPage, String> isolate =
+      IsolateManager.create(ChannelPage.parse);
+
 
   /// Initializes an instance of [ChannelClient]
-  const ChannelClient(this._httpClient);
+   ChannelClient(this._httpClient);
 
   /// Gets the metadata associated with the specified channel.
   /// [id] must be either a [ChannelId] or a string
   /// which is parsed to a [ChannelId]
   Future<Channel> get(dynamic id) async {
     id = ChannelId.fromString(id);
-    final channelPage = await ChannelPage.get(_httpClient, id.value);
+
+    final channelPage = await ChannelPage.get(_httpClient, id.value, isolate);
 
     return Channel(
       id,
@@ -179,5 +185,9 @@ class ChannelClient {
       page,
       _httpClient,
     );
+  }
+
+  close() {
+    isolate.stop();
   }
 }
