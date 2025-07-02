@@ -19,7 +19,7 @@ dependencies:
   http_parser: ^4.0.0
   json_annotation: ^4.9.0
   meta: ^1.7.0
-  xml: ^6.1.0
+  xml: ^6.5.0
   logging: ^1.2.0
   unicode: ^1.0.0
   isolate_manager: ^5.1.0
