@@ -39,7 +39,8 @@ class ClosedCaptionClient {
   // Internal helper methods
   static String _extractVideoId(String input) {
     final patterns = [
-      RegExp(r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([^&?/]+)'),
+      RegExp(
+          r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([^&?/]+)'),
       RegExp(r'[?&]v=([^&]+)'),
     ];
     for (final pattern in patterns) {
@@ -132,22 +133,30 @@ class ClosedCaptionClient {
 class ClosedCaption {
   final xml.XmlElement root;
 
+  /// The text content of the caption.
   String get text => root.innerText;
 
-  late final Duration offset =
-      Duration(milliseconds: int.parse(root.getAttribute('t') ?? '0'));
+  /// Start time of the caption.
+  late final Duration offset = Duration(
+      milliseconds:
+          (double.tryParse(root.getAttribute('start') ?? '0')! * 1000).round());
 
-  late final Duration duration =
-      Duration(milliseconds: int.parse(root.getAttribute('d') ?? '0'));
+  /// Duration of the caption.
+  late final Duration duration = Duration(
+      milliseconds:
+          (double.tryParse(root.getAttribute('dur') ?? '0')! * 1000).round());
 
+  /// End time = offset + duration
   late final Duration end = offset + duration;
 
-  late final List<ClosedCaptionPart> parts =
-      root.findAllElements('s').map((e) => ClosedCaptionPart._(e)).toList();
+  /// No parts in <text> style captions, keep empty list for compatibility
+  late final List<ClosedCaptionPart> parts = [];
 
   ClosedCaption._(this.root);
 }
 
+///
+/// Represents a part of a closed caption (unused for <text> tags)
 class ClosedCaptionPart {
   final xml.XmlElement root;
 
