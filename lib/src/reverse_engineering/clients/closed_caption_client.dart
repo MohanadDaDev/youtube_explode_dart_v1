@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:xml/xml.dart' as xml;
 
 import '../../extensions/helpers_extension.dart';
@@ -27,7 +29,7 @@ class ClosedCaptionClient {
     final formatUrl = url.replaceQueryParameters({'fmt': 'srv3'});
     return retry(httpClient, () async {
       final raw = await httpClient.getString(formatUrl);
-      print('[ClosedCaptionClient] Raw XML Response:\n$raw');
+      log('[ClosedCaptionClient] Raw XML Response:\n$raw');
 
       // Safety check (optional)
       if (!raw.trim().startsWith('<')) {
