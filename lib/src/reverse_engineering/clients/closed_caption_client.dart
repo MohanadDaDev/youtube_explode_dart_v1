@@ -27,6 +27,13 @@ class ClosedCaptionClient {
     final formatUrl = url.replaceQueryParameters({'fmt': 'srv3'});
     return retry(httpClient, () async {
       final raw = await httpClient.getString(formatUrl);
+      print('[ClosedCaptionClient] Raw XML Response:\n$raw');
+
+      // Safety check (optional)
+      if (!raw.trim().startsWith('<')) {
+        throw Exception('Expected XML but got: ${raw.substring(0, 100)}');
+      }
+
       return ClosedCaptionClient.parse(raw);
     });
   }
