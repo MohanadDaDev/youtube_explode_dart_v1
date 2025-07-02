@@ -2,102 +2,76 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
-import '../../../youtube_explode_dart.dart';
-
-/// Client to fetch and parse closed captions from YouTube using InnerTube API.
+/// Represents a closed caption track with XML parsing.
 class ClosedCaptionClient {
   final xml.XmlDocument root;
 
-  /// List of parsed captions from XML.
+  /// All parsed captions (p elements).
   late final Iterable<ClosedCaption> closedCaptions =
-      root.findAllElements('text').map((e) => ClosedCaption._(e));
+      root.findAllElements('p').map((e) => ClosedCaption._(e));
 
+  /// Constructor from XML root.
   ClosedCaptionClient(this.root);
 
+  /// Construct from raw XML string.
   ClosedCaptionClient.parse(String raw) : root = xml.XmlDocument.parse(raw);
 
-  static const _watchUrl = 'https://www.youtube.com/watch?v=';
-  static const _innerTubeUrl =
-      'https://www.youtube.com/youtubei/v1/player?key=';
-
-  /// Fetches and parses caption XML using InnerTube API.
+  /// Main entry point — fetches captions from YouTube via InnerTube API.
   static Future<ClosedCaptionClient> get(
     dynamic _,
-    Uri url,
+    Uri inputUrl,
   ) async {
-    final urlStr = url.toString();
+    String? videoId;
 
-    // ✅ Case 1: Direct caption URL — fetch directly
-    if (urlStr.contains('/api/timedtext') ||
-        urlStr.contains('/timedtext') ||
-        urlStr.contains('fmt=srv')) {
-      final response = await http.get(Uri.parse(urlStr));
-      if (response.statusCode != 200) {
-        throw Exception('Failed to fetch caption XML from direct URL');
-      }
-      return ClosedCaptionClient.parse(response.body);
-    }
-
-    // ✅ Case 2: Fall back to InnerTube if it's a video URL
-    final videoId = _extractVideoId(urlStr);
-    final html = await _fetchVideoHtml(videoId);
-    final apiKey = _extractApiKey(html);
-    final captionUrl = await _getCaptionUrl(videoId, apiKey);
-
-    final response = await http.get(Uri.parse(captionUrl));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to fetch caption XML from InnerTube');
-    }
-
-    return ClosedCaptionClient.parse(response.body);
-  }
-
-  static String _extractVideoId(String url) {
+    // Try to extract video ID from URL or assume it's an ID
+    final inputStr = inputUrl.toString();
     final patterns = [
-      RegExp(
-          r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([^&?/]+)'),
+      RegExp(r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([^&?/]+)'),
+      RegExp(r'[?&]v=([^&]+)'),
     ];
-
     for (final pattern in patterns) {
-      final match = pattern.firstMatch(url);
-      if (match != null) return match.group(1)!;
+      final match = pattern.firstMatch(inputStr);
+      if (match != null) {
+        videoId = match.group(1);
+        break;
+      }
     }
 
-    if (!url.contains('/')) return url;
+    if (videoId == null && !inputStr.contains('/')) {
+      videoId = inputStr;
+    }
 
-    throw Exception('Invalid YouTube URL: $url');
-  }
+    if (videoId == null) {
+      throw Exception('Could not extract YouTube video ID from input: $inputStr');
+    }
 
-  static Future<String> _fetchVideoHtml(String videoId) async {
-    final res = await http.get(
-      Uri.parse('$_watchUrl$videoId'),
+    // Step 1: Fetch video page HTML
+    final htmlResponse = await http.get(
+      Uri.parse('https://www.youtube.com/watch?v=$videoId'),
       headers: {
         'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     );
 
-    if (res.statusCode != 200) {
-      throw Exception('Failed to fetch YouTube watch page');
+    if (htmlResponse.statusCode != 200) {
+      throw Exception('Failed to load YouTube video page');
     }
 
-    return res.body;
-  }
+    final html = htmlResponse.body;
 
-  static String _extractApiKey(String html) {
-    final pattern = RegExp(r'"INNERTUBE_API_KEY":"([a-zA-Z0-9_-]+)"');
-    final match = pattern.firstMatch(html);
-
-    if (match != null && match.groupCount >= 1) {
-      return match.group(1)!;
+    // Step 2: Extract API key from HTML
+    final apiKeyMatch =
+        RegExp(r'"INNERTUBE_API_KEY":"([a-zA-Z0-9_\-]+)"').firstMatch(html);
+    if (apiKeyMatch == null) {
+      throw Exception('Failed to extract InnerTube API key from HTML');
     }
+    final apiKey = apiKeyMatch.group(1)!;
 
-    throw Exception('Failed to extract API key from HTML');
-  }
-
-  static Future<String> _getCaptionUrl(String videoId, String apiKey) async {
-    final response = await http.post(
-      Uri.parse('$_innerTubeUrl$apiKey'),
+    // Step 3: Fetch InnerTube player data
+    final innerTubeResponse = await http.post(
+      Uri.parse('https://www.youtube.com/youtubei/v1/player?key=$apiKey'),
       headers: {
         'Content-Type': 'application/json',
         'User-Agent':
@@ -116,43 +90,75 @@ class ClosedCaptionClient {
       }),
     );
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to fetch player response from InnerTube');
+    if (innerTubeResponse.statusCode != 200) {
+      throw Exception('Failed to fetch InnerTube player data');
     }
 
-    final data = jsonDecode(response.body);
-    final captions = data['captions']?['playerCaptionsTracklistRenderer'];
-    if (captions == null || captions['captionTracks'] == null) {
-      throw Exception('No captions found');
+    final json = jsonDecode(innerTubeResponse.body);
+    final captionsData = json['captions']?['playerCaptionsTracklistRenderer'];
+    final captionTracks = captionsData?['captionTracks'];
+
+    if (captionTracks == null || captionTracks.isEmpty) {
+      throw Exception('No captions found for this video');
     }
 
-    final tracks = List<Map<String, dynamic>>.from(captions['captionTracks']);
-    return tracks.first['baseUrl'];
+    // Step 4: Pick the first caption track (or use language match if needed)
+    final track = captionTracks[0];
+    final captionUrl = track['baseUrl'];
+
+    // Step 5: Fetch the actual caption XML
+    final captionXmlRes = await http.get(
+      Uri.parse(captionUrl),
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': '*/*',
+      },
+    );
+
+    if (captionXmlRes.statusCode != 200 || captionXmlRes.body.isEmpty) {
+      throw Exception('Failed to fetch caption XML');
+    }
+
+    return ClosedCaptionClient.parse(captionXmlRes.body);
   }
 }
 
-/// Represents a single closed caption element from XML.
+/// Represents a single caption <p> element.
 class ClosedCaption {
   final xml.XmlElement root;
 
+  /// Full caption text.
   String get text => root.innerText;
 
-  late final Duration offset = Duration(
-    milliseconds:
-        (double.tryParse(root.getAttribute('start') ?? '0')! * 1000).toInt(),
-  );
+  /// Start time offset.
+  late final Duration offset =
+      Duration(milliseconds: int.parse(root.getAttribute('t') ?? '0'));
 
-  late final Duration duration = Duration(
-    milliseconds:
-        (double.tryParse(root.getAttribute('dur') ?? '0')! * 1000).toInt(),
-  );
+  /// Duration of this caption.
+  late final Duration duration =
+      Duration(milliseconds: int.parse(root.getAttribute('d') ?? '0'));
 
+  /// End time = offset + duration.
   late final Duration end = offset + duration;
 
-  // These are not nested in <text> captions
-  final List<ClosedCaptionPart> parts = [];
+  /// Parts (individual <s> elements).
+  late final List<ClosedCaptionPart> parts =
+      root.findAllElements('s').map((e) => ClosedCaptionPart._(e)).toList();
 
   ClosedCaption._(this.root);
 }
 
-/// Part of a closed caption (not used in <text>-based format, but kept for API
+/// Represents a single word or segment <s> element inside a caption.
+class ClosedCaptionPart {
+  final xml.XmlElement root;
+
+  /// Word or segment text.
+  String get text => root.innerText;
+
+  /// Offset time relative to start.
+  late final Duration offset =
+      Duration(milliseconds: int.parse(root.getAttribute('t') ?? '0'));
+
+  ClosedCaptionPart._(this.root);
+}
