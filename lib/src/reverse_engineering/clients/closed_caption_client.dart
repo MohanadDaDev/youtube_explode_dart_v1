@@ -25,18 +25,31 @@ class ClosedCaptionClient {
     dynamic _,
     Uri url,
   ) async {
-    final videoId = _extractVideoId(url.toString());
+    final urlStr = url.toString();
+
+    // ✅ Case 1: Direct caption URL — fetch directly
+    if (urlStr.contains('/api/timedtext') ||
+        urlStr.contains('/timedtext') ||
+        urlStr.contains('fmt=srv')) {
+      final response = await http.get(Uri.parse(urlStr));
+      if (response.statusCode != 200) {
+        throw Exception('Failed to fetch caption XML from direct URL');
+      }
+      return ClosedCaptionClient.parse(response.body);
+    }
+
+    // ✅ Case 2: Fall back to InnerTube if it's a video URL
+    final videoId = _extractVideoId(urlStr);
     final html = await _fetchVideoHtml(videoId);
     final apiKey = _extractApiKey(html);
     final captionUrl = await _getCaptionUrl(videoId, apiKey);
 
     final response = await http.get(Uri.parse(captionUrl));
     if (response.statusCode != 200) {
-      throw Exception('Failed to fetch caption XML');
+      throw Exception('Failed to fetch caption XML from InnerTube');
     }
 
-    final raw = response.body;
-    return ClosedCaptionClient.parse(raw);
+    return ClosedCaptionClient.parse(response.body);
   }
 
   static String _extractVideoId(String url) {
